@@ -42,10 +42,16 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# Platform directories
-/android/
+# Platform directories (regenerable, but track android config)
 /ios/
 /linux/
 /macos/
 /windows/
 /web/
+
+# Android — ignore build artifacts but track config
+/android/.gradle/
+/android/app/build/
+/android/build/
+/android/local.properties
+/android/key.properties

@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'core/theme/app_theme.dart';
+import 'features/sms/providers/sms_provider.dart';
+import 'main.dart' show requestNotificationPermission;
 import 'shared/providers/auth_provider.dart';
 import 'shared/providers/theme_provider.dart';
 import 'features/auth/screens/login_screen.dart';
@@ -106,11 +109,39 @@ final routerProvider = Provider<GoRouter>((ref) {
   );
 });
 
-class MoneyManagerApp extends ConsumerWidget {
+class MoneyManagerApp extends ConsumerStatefulWidget {
   const MoneyManagerApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MoneyManagerApp> createState() => _MoneyManagerAppState();
+}
+
+class _MoneyManagerAppState extends ConsumerState<MoneyManagerApp> {
+  bool _initialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    SchedulerBinding.instance.addPostFrameCallback((_) => _initPermissions());
+  }
+
+  Future<void> _initPermissions() async {
+    if (_initialized) return;
+    _initialized = true;
+
+    // Request notification permission (Android 13+)
+    await requestNotificationPermission();
+
+    // Auto-start SMS listener if previously enabled
+    final smsService = ref.read(smsListenerProvider);
+    final smsEnabled = await smsService.isEnabled();
+    if (smsEnabled) {
+      smsService.startListening();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final router = ref.watch(routerProvider);
     final themeMode = ref.watch(themeProvider);
 

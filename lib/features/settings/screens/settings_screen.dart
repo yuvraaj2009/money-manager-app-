@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../../shared/providers/auth_provider.dart';
 import '../../../shared/providers/theme_provider.dart';
+import '../../sms/providers/sms_provider.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -14,7 +16,87 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
-  bool _smsAutoTracking = true;
+  bool _smsAutoTracking = false;
+  bool _loadingPref = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSmsPref();
+  }
+
+  Future<void> _loadSmsPref() async {
+    final sms = ref.read(smsListenerProvider);
+    final enabled = await sms.isEnabled();
+    if (mounted) setState(() { _smsAutoTracking = enabled; _loadingPref = false; });
+  }
+
+  Future<void> _onSmsToggle(bool value) async {
+    final sms = ref.read(smsListenerProvider);
+
+    if (!value) {
+      // Turning OFF
+      sms.stopListening();
+      await sms.setEnabled(false);
+      setState(() => _smsAutoTracking = false);
+      return;
+    }
+
+    // Turning ON — check permissions
+    final smsStatus = await Permission.sms.status;
+    if (smsStatus.isGranted) {
+      await sms.setEnabled(true);
+      sms.startListening();
+      setState(() => _smsAutoTracking = true);
+      return;
+    }
+
+    // Show explanation dialog
+    if (!mounted) return;
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('SMS Permission Required'),
+        content: const Text(
+          'Money Manager needs SMS access to automatically detect bank '
+          'transactions. Your SMS data stays on this device — only parsed '
+          'amounts and categories are sent to the server.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Allow'),
+          ),
+        ],
+      ),
+    );
+
+    if (proceed != true) return;
+
+    // Request permissions
+    final results = await [
+      Permission.sms,
+    ].request();
+
+    final granted = results[Permission.sms]?.isGranted ?? false;
+
+    if (granted) {
+      await sms.setEnabled(true);
+      sms.startListening();
+      setState(() => _smsAutoTracking = true);
+    } else {
+      setState(() => _smsAutoTracking = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('SMS permission required for auto-tracking')),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -114,11 +196,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     Expanded(
                       child: Text('SMS Auto-Tracking', style: theme.textTheme.titleSmall),
                     ),
-                    Switch(
-                      value: _smsAutoTracking,
-                      onChanged: (v) => setState(() => _smsAutoTracking = v),
-                      activeTrackColor: theme.colorScheme.primary,
-                    ),
+                    _loadingPref
+                        ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Switch(
+                            value: _smsAutoTracking,
+                            onChanged: _onSmsToggle,
+                            activeTrackColor: theme.colorScheme.primary,
+                          ),
                   ],
                 ),
               ),
