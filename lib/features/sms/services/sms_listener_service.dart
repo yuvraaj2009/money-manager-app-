@@ -6,7 +6,8 @@ import '../../../data/remote/sms_api.dart';
 
 /// Bank sender ID keywords to filter SMS
 const _bankKeywords = [
-  'SBI', 'HDFC', 'ICICI', 'AXIS', 'KOTAK', 'PNB', 'BOB', 'CANARA', 'UNION', 'IDBI',
+  'SBI', 'HDFC', 'ICICI', 'AXIS', 'KOTAK', 'PNB', 'PNBSMS', 'BOB', 'BOBONE',
+  'BOBCARD', 'CANARA', 'UNION', 'IDBI',
 ];
 
 /// Background SMS handler — must be a top-level function for telephony package
