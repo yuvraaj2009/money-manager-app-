@@ -4,13 +4,98 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../../shared/providers/api_provider.dart';
 import '../providers/report_provider.dart';
 
-class BudgetScreen extends ConsumerWidget {
+class BudgetScreen extends ConsumerStatefulWidget {
   const BudgetScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<BudgetScreen> createState() => _BudgetScreenState();
+}
+
+class _BudgetScreenState extends ConsumerState<BudgetScreen> {
+  Future<void> _showCreateBudgetDialog() async {
+    final amountController = TextEditingController();
+    final now = DateTime.now();
+    final monthStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-01';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Create Monthly Budget'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Set your total budget for ${_monthName(now.month)} ${now.year}',
+              style: Theme.of(ctx).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: amountController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Budget Amount',
+                prefixText: 'Rs ',
+                border: OutlineInputBorder(),
+              ),
+              autofocus: true,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || amountController.text.isEmpty) return;
+
+    final amount = double.tryParse(amountController.text);
+    if (amount == null || amount <= 0) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Enter a valid amount')),
+        );
+      }
+      return;
+    }
+
+    try {
+      final budgetApi = ref.read(budgetApiProvider);
+      await budgetApi.create(amount: amount, month: monthStr);
+      // Refresh the report
+      ref.invalidate(monthlyReportProvider((year: now.year, month: now.month)));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Budget of ${CurrencyFormatter.format(amount)} created')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to create budget: $e')),
+        );
+      }
+    }
+  }
+
+  String _monthName(int month) {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return months[month - 1];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ref = this.ref;
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final now = DateTime.now();
@@ -90,7 +175,7 @@ class BudgetScreen extends ConsumerWidget {
                               SizedBox(
                                 width: double.infinity,
                                 child: OutlinedButton(
-                                  onPressed: () {},
+                                  onPressed: _showCreateBudgetDialog,
                                   style: OutlinedButton.styleFrom(
                                     padding: const EdgeInsets.symmetric(vertical: 12),
                                     shape: RoundedRectangleBorder(

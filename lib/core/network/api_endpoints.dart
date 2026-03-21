@@ -23,6 +23,9 @@ class ApiEndpoints {
   static String smsConfirm(String id) => '/sms/confirm/$id';
   static String smsReject(String id) => '/sms/reject/$id';
 
+  // Budgets
+  static const String budgets = '/budgets';
+
   // Reports
   static String monthlyReport(int year, int month) =>
       '/reports/monthly/$year/$month';

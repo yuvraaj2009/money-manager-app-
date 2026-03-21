@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
 
 import 'core/theme/app_theme.dart';
 import 'features/sms/providers/sms_provider.dart';
-import 'main.dart' show requestNotificationPermission;
+import 'main.dart' show requestNotificationPermission, getPendingSmsFromNative, clearPendingSmsNative;
+import 'shared/providers/api_provider.dart';
 import 'shared/providers/auth_provider.dart';
 import 'shared/providers/theme_provider.dart';
 import 'features/auth/screens/login_screen.dart';
@@ -137,6 +139,62 @@ class _MoneyManagerAppState extends ConsumerState<MoneyManagerApp> {
     final smsEnabled = await smsService.isEnabled();
     if (smsEnabled) {
       smsService.startListening();
+    }
+
+    // Process any SMS captured by BroadcastReceiver while app was closed
+    _processPendingNativeSms();
+
+    // Show battery optimization dialog once
+    _showBatteryOptimizationTip();
+  }
+
+  Future<void> _showBatteryOptimizationTip() async {
+    const storage = FlutterSecureStorage();
+    const key = 'battery_tip_shown';
+    final shown = await storage.read(key: key);
+    if (shown == 'true') return;
+
+    // Wait for auth to resolve — only show if user is logged in
+    await Future.delayed(const Duration(seconds: 2));
+    if (!mounted) return;
+    final authState = ref.read(authProvider);
+    if (authState.status != AuthStatus.authenticated) return;
+
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Improve SMS Tracking'),
+        content: const Text(
+          'For best SMS tracking, please disable battery optimization for Money Manager.\n\n'
+          'Go to: Settings \u2192 Apps \u2192 Money Manager \u2192 Battery \u2192 Unrestricted',
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
+    await storage.write(key: key, value: 'true');
+  }
+
+  Future<void> _processPendingNativeSms() async {
+    try {
+      final pending = await getPendingSmsFromNative();
+      if (pending.isEmpty) return;
+
+      final smsApi = ref.read(smsApiProvider);
+      for (final sms in pending) {
+        final body = sms['body'] ?? '';
+        if (body.isNotEmpty) {
+          await smsApi.parseSms(body);
+        }
+      }
+      await clearPendingSmsNative();
+    } catch (_) {
+      // Silently fail — pending SMS will be retried next launch
     }
   }
 
