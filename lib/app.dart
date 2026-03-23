@@ -33,15 +33,28 @@ final routerProvider = Provider<GoRouter>((ref) {
     navigatorKey: _rootNavigatorKey,
     initialLocation: '/',
     redirect: (context, state) {
-      final isAuth = authState.status == AuthStatus.authenticated;
+      final status = authState.status;
+      final isAuth = status == AuthStatus.authenticated;
       final isAuthRoute = state.matchedLocation == '/login' ||
           state.matchedLocation == '/register';
 
-      if (authState.status == AuthStatus.unknown) return null;
+      debugPrint('ROUTER REDIRECT: status=$status, path=${state.matchedLocation}, isAuth=$isAuth, isAuthRoute=$isAuthRoute');
 
-      if (!isAuth && !isAuthRoute) return '/login';
-      if (isAuth && isAuthRoute) return '/';
+      if (status == AuthStatus.unknown) {
+        debugPrint('ROUTER REDIRECT: status=unknown, showing splash (no redirect)');
+        return null;
+      }
 
+      if (!isAuth && !isAuthRoute) {
+        debugPrint('ROUTER REDIRECT: not auth + not auth route → /login');
+        return '/login';
+      }
+      if (isAuth && isAuthRoute) {
+        debugPrint('ROUTER REDIRECT: auth + on auth route → /');
+        return '/';
+      }
+
+      debugPrint('ROUTER REDIRECT: no redirect needed');
       return null;
     },
     routes: [
@@ -182,19 +195,43 @@ class _MoneyManagerAppState extends ConsumerState<MoneyManagerApp> {
 
   Future<void> _processPendingNativeSms() async {
     try {
+      debugPrint('SMS_PENDING: checking SharedPreferences for stored SMS...');
       final pending = await getPendingSmsFromNative();
+      debugPrint('SMS_PENDING: found ${pending.length} pending SMS');
+
       if (pending.isEmpty) return;
+
+      // Wait for auth to be ready before calling API
+      final authState = ref.read(authProvider);
+      if (authState.status != AuthStatus.authenticated) {
+        debugPrint('SMS_PENDING: not authenticated yet, deferring processing');
+        return;
+      }
 
       final smsApi = ref.read(smsApiProvider);
       for (final sms in pending) {
         final body = sms['body'] ?? '';
+        final sender = sms['sender'] ?? '';
+        final timestamp = sms['timestamp'] ?? '';
+        debugPrint('SMS_PENDING: processing SMS from "$sender": "${body.length > 80 ? body.substring(0, 80) : body}..."');
+
         if (body.isNotEmpty) {
-          await smsApi.parseSms(body);
+          try {
+            final result = await smsApi.parseSms(
+              body,
+              sender: sender,
+              timestamp: timestamp.isNotEmpty ? timestamp : null,
+            );
+            debugPrint('SMS_PENDING: API response = $result');
+          } catch (e) {
+            debugPrint('SMS_PENDING: API call FAILED for SMS: $e');
+          }
         }
       }
       await clearPendingSmsNative();
-    } catch (_) {
-      // Silently fail — pending SMS will be retried next launch
+      debugPrint('SMS_PENDING: cleared pending SMS from native storage');
+    } catch (e) {
+      debugPrint('SMS_PENDING: ERROR processing pending SMS: $e');
     }
   }
 

@@ -7,17 +7,33 @@ class SmsApi {
 
   SmsApi(this._client);
 
-  Future<Map<String, dynamic>> parseSms(String smsBody) async {
-    return await _client.post(
-      ApiEndpoints.smsParse,
-      data: {'sms_body': smsBody},
-    );
+  Future<Map<String, dynamic>> parseSms(
+    String smsBody, {
+    String? sender,
+    String? timestamp,
+  }) async {
+    // timestamp is required by backend — default to current ISO time
+    final ts = timestamp ?? DateTime.now().toIso8601String();
+    final data = <String, dynamic>{
+      'sms_body': smsBody,
+      'timestamp': ts,
+    };
+    if (sender != null && sender.isNotEmpty) {
+      data['sender'] = sender;
+    }
+    return await _client.post(ApiEndpoints.smsParse, data: data);
   }
 
-  Future<Map<String, dynamic>> batchParse(List<String> messages) async {
+  Future<Map<String, dynamic>> batchParse(List<Map<String, String>> messages) async {
     return await _client.post(
       ApiEndpoints.smsBatch,
-      data: {'messages': messages},
+      data: {
+        'messages': messages.map((m) => {
+          'sms_body': m['body'] ?? '',
+          'timestamp': m['timestamp'] ?? DateTime.now().toIso8601String(),
+          'sender': m['sender'],
+        }).toList(),
+      },
     );
   }
 
@@ -31,7 +47,7 @@ class SmsApi {
 
   Future<Transaction> confirm(String id) async {
     final response = await _client.post(ApiEndpoints.smsConfirm(id));
-    return Transaction.fromJson(response['transaction'] as Map<String, dynamic>);
+    return Transaction.fromJson(response);
   }
 
   Future<void> reject(String id) async {

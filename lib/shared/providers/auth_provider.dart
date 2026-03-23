@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/models/user.dart';
@@ -41,21 +42,53 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<void> _checkAuth() async {
+    debugPrint('AUTH CHECK: reading tokens from storage...');
     final client = _ref.read(apiClientProvider);
-    final hasTokens = await client.hasTokens();
-    if (hasTokens) {
+    final hasToken = await client.hasTokens();
+    debugPrint('AUTH CHECK: jwt_token = ${hasToken ? "EXISTS" : "NULL"}');
+
+    if (hasToken) {
       try {
+        debugPrint('AUTH CHECK: calling /auth/me...');
         final authApi = _ref.read(authApiProvider);
         final user = await authApi.me();
+        debugPrint('AUTH CHECK: /auth/me SUCCESS — user=${user.name}');
         state = AuthState(
           status: AuthStatus.authenticated,
           user: user,
         );
-      } catch (_) {
+      } catch (e) {
+        debugPrint('AUTH CHECK: /auth/me FAILED — $e');
+        debugPrint('AUTH CHECK: attempting token refresh...');
+        // Try refresh before giving up
+        try {
+          final refreshToken = await client.getRefreshToken();
+          if (refreshToken != null) {
+            final authApi = _ref.read(authApiProvider);
+            final response = await authApi.refresh(refreshToken);
+            final tokens = response['tokens'] as Map<String, dynamic>;
+            await client.saveTokens(
+              tokens['access_token'] as String,
+              tokens['refresh_token'] as String,
+            );
+            debugPrint('AUTH CHECK: refresh SUCCESS, retrying /auth/me...');
+            final user = await authApi.me();
+            debugPrint('AUTH CHECK: /auth/me after refresh SUCCESS — user=${user.name}');
+            state = AuthState(
+              status: AuthStatus.authenticated,
+              user: user,
+            );
+            return;
+          }
+        } catch (refreshError) {
+          debugPrint('AUTH CHECK: refresh FAILED — $refreshError');
+        }
         await client.clearTokens();
+        debugPrint('AUTH CHECK: tokens cleared, setting UNAUTHENTICATED');
         state = const AuthState(status: AuthStatus.unauthenticated);
       }
     } else {
+      debugPrint('AUTH CHECK: no tokens found, setting UNAUTHENTICATED');
       state = const AuthState(status: AuthStatus.unauthenticated);
     }
   }
@@ -66,19 +99,27 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final authApi = _ref.read(authApiProvider);
       final client = _ref.read(apiClientProvider);
 
+      debugPrint('AUTH LOGIN: calling /auth/login...');
       final response = await authApi.login(email: email, password: password);
       final tokens = response['tokens'] as Map<String, dynamic>;
-      await client.saveTokens(
-        tokens['access_token'] as String,
-        tokens['refresh_token'] as String,
-      );
+      final accessToken = tokens['access_token'] as String;
+      final refreshToken = tokens['refresh_token'] as String;
+
+      debugPrint('AUTH LOGIN: saving tokens to secure storage...');
+      await client.saveTokens(accessToken, refreshToken);
+
+      // Verify tokens were saved
+      final saved = await client.hasTokens();
+      debugPrint('AUTH LOGIN: tokens saved = $saved');
 
       final user = User.fromJson(response['user'] as Map<String, dynamic>);
+      debugPrint('AUTH LOGIN: SUCCESS — user=${user.name}');
       state = AuthState(
         status: AuthStatus.authenticated,
         user: user,
       );
     } catch (e) {
+      debugPrint('AUTH LOGIN: FAILED — $e');
       state = state.copyWith(
         isLoading: false,
         error: e.toString(),
@@ -92,23 +133,30 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final authApi = _ref.read(authApiProvider);
       final client = _ref.read(apiClientProvider);
 
+      debugPrint('AUTH REGISTER: calling /auth/register...');
       final response = await authApi.register(
         name: name,
         email: email,
         password: password,
       );
       final tokens = response['tokens'] as Map<String, dynamic>;
-      await client.saveTokens(
-        tokens['access_token'] as String,
-        tokens['refresh_token'] as String,
-      );
+      final accessToken = tokens['access_token'] as String;
+      final refreshToken = tokens['refresh_token'] as String;
+
+      debugPrint('AUTH REGISTER: saving tokens to secure storage...');
+      await client.saveTokens(accessToken, refreshToken);
+
+      final saved = await client.hasTokens();
+      debugPrint('AUTH REGISTER: tokens saved = $saved');
 
       final user = User.fromJson(response['user'] as Map<String, dynamic>);
+      debugPrint('AUTH REGISTER: SUCCESS — user=${user.name}');
       state = AuthState(
         status: AuthStatus.authenticated,
         user: user,
       );
     } catch (e) {
+      debugPrint('AUTH REGISTER: FAILED — $e');
       state = state.copyWith(
         isLoading: false,
         error: e.toString(),
@@ -117,8 +165,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<void> logout() async {
+    debugPrint('AUTH LOGOUT: clearing tokens...');
     final client = _ref.read(apiClientProvider);
     await client.clearTokens();
+    debugPrint('AUTH LOGOUT: done, setting UNAUTHENTICATED');
     state = const AuthState(status: AuthStatus.unauthenticated);
   }
 
